@@ -52,7 +52,7 @@ export const useMemorySystem = (apiUrl: string = ''): MemorySystem => {
       }
       
       // 生成会话ID
-      const conversationId = `conv_${Date.now()}`;
+      // const conversationId = `conv_${Date.now()}`;
       
       // 调用后端API保存对话
       const response = await fetch(`${baseUrl}/api/memories`, {
@@ -61,9 +61,10 @@ export const useMemorySystem = (apiUrl: string = ''): MemorySystem => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          conversation_id: conversationId,
-          summary: null, // 让后端自动生成摘要
-          tags: []
+          // conversation_id: conversationId,
+          conversations: localStorage.getItem('conversations'),
+          // summary: null, // 让后端自动生成摘要
+          // tags: []
         })
       });
       

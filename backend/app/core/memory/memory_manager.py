@@ -80,6 +80,7 @@ class MemoryManager:
             print("记忆处理循环被取消")
         except Exception as e:
             print(f"记忆处理循环异常: {str(e)}")
+            # TODO：重新启动任务
         finally:
             print("记忆处理循环已退出")
     
@@ -182,7 +183,7 @@ class MemoryManager:
         if not conversation_history:
             return False
         
-        # 创建记忆数据
+        # 创建记忆数据 TODO: 需要调用TS总结内容
         memory_data = {
             "conversation_id": f"conv_{int(time.time())}",
             "timestamp": datetime.now().isoformat(),

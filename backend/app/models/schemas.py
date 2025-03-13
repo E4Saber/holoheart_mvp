@@ -9,6 +9,7 @@ class ChatMessage(BaseModel):
     content: str
     timestamp: str = Field(default_factory=lambda: datetime.now().strftime("%H:%M:%S"))
     audio_path: Optional[str] = None
+    is_Error: Optional[bool] = None
 
 class ChatRequest(BaseModel):
     """聊天请求模型"""
@@ -63,6 +64,7 @@ class MemoryDetail(BaseModel):
 class MemoryCreateRequest(BaseModel):
     """创建记忆请求模型"""
     conversation_id: str
+    conversations: List[ChatMessage]
     summary: Optional[str] = None
     tags: List[str] = []
 

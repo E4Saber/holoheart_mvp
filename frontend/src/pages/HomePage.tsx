@@ -156,13 +156,13 @@ const HomePage: React.FC = () => {
                 // 更新正在输入的消息
                 newConversations[newConversations.length - 1] = {
                   ...lastMsg,
-                  content: fullResponse
+                  content: lastMsg.content + chunk
                 };
               } else {
                 // 添加新的assistant消息
                 newConversations.push({
                   role: 'assistant',
-                  content: fullResponse,
+                  content: chunk,
                   timestamp: new Date().toISOString(),
                   isTyping: true
                 });

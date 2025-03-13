@@ -22,7 +22,7 @@ from app.core.audio.audio_manager import get_audio_manager
 from app.core.memory.memory_manager import get_memory_system
 from app.core.audio.speech_recognizer import get_speech_service
 from app.engine.tts_engine import text_to_speech
-from app.utils.text_cleaner import clean_text_for_tts, split_text_for_tts
+from app.utils.text_cleaner import clean_text_for_tts, split_text_for_tts, find_sentence_end
 from app.config.config import settings
 
 # 创建API路由
@@ -148,6 +148,7 @@ async def chat(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"聊天处理失败: {str(e)}")
 
+
 # 流式聊天端点 - 修改部分
 @api_router.post("/chat/stream")
 async def stream_chat(request: ExtendedChatRequest):
@@ -189,6 +190,7 @@ async def stream_chat(request: ExtendedChatRequest):
                                 })
             
             # 流式调用Kimi API
+            # 在异步函数中使用async for需要一个实现了__aiter__方法的对象
             async for chunk in kimi_api_client.stream_chat(
                 message=request.message,
                 history=conversation_history
@@ -265,21 +267,6 @@ async def stream_chat(request: ExtendedChatRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"流式聊天处理失败: {str(e)}")
-
-# 辅助函数：查找句子结束位置
-def find_sentence_end(text: str) -> int:
-    """查找文本中句子的结束位置"""
-    end_chars = ["。", "？", "！", ".", "?", "!"]
-    positions = [text.find(char) for char in end_chars]
-    valid_positions = [pos for pos in positions if pos != -1]
-    
-    if valid_positions:
-        return min(valid_positions)
-    else:
-        # 如果没有找到句号等标点，但文本已经足够长，也可以直接返回
-        if len(text) > 50:
-            return len(text) - 1
-        return -1
 
 # 文本到语音端点
 @api_router.post("/tts")
@@ -460,13 +447,13 @@ async def create_memory(request: MemoryCreateRequest):
         memory_system = get_memory_system()
         
         # TODO: 获取对话历史
-        conversation_history = []
+        conversation_history = request.conversations
         
         # 保存到记忆系统
         success = await memory_system.save_conversation(
             conversation_history,
-            summary=request.summary,
-            tags=request.tags
+            # summary=request.summary,
+            # tags=request.tags
         )
         
         if not success:

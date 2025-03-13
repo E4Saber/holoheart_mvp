@@ -201,7 +201,7 @@ class KimiAPI:
             {"role": "user", "content": message}
         ]
         
-        yield from self.process_stream_chat(messages)
+        return self.process_stream_chat(messages)
     
     def process_chat_request(self, messages):
         """处理聊天请求的核心逻辑 - 优化版：直接使用一次请求完成工具调用"""
@@ -282,7 +282,7 @@ class KimiAPI:
             print(f"处理聊天请求时出错: {str(e)}")
             raise
     
-    def process_stream_chat(self, messages):
+    async def process_stream_chat(self, messages):
         """使用循环结构处理工具调用的流式响应，同时保证普通响应也是流式的"""
         response_id = f"chatcmpl-{int(time.time() * 1000)}"
         self.request_count += 1

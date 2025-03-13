@@ -125,3 +125,18 @@ def split_text_for_tts(text, max_length=300):
         paragraphs.append(current_paragraph.strip())
     
     return paragraphs
+
+# 辅助函数：查找句子结束位置
+def find_sentence_end(text: str) -> int:
+    """查找文本中句子的结束位置"""
+    end_chars = ["。", "？", "！", ".", "?", "!"]
+    positions = [text.find(char) for char in end_chars]
+    valid_positions = [pos for pos in positions if pos != -1]
+    
+    if valid_positions:
+        return min(valid_positions)
+    else:
+        # 如果没有找到句号等标点，但文本已经足够长，也可以直接返回
+        if len(text) > 50:
+            return len(text) - 1
+        return -1
