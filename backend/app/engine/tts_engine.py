@@ -159,13 +159,21 @@ def text_to_speech(text, style="normal"):
         output_file = temp_file.name
     
     try:
-        # 创建事件循环
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # 运行异步函数
-        success = loop.run_until_complete(generate_speech_async(clean_text, voice, output_file))
-        loop.close()
+        # 检查是否已经有事件循环在运行
+        try:
+            loop = asyncio.get_running_loop()
+            # 如果能获取到循环，说明已经在异步环境中
+            # 使用线程池运行异步函数
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(_run_in_thread, clean_text, voice, output_file)
+                success = future.result()
+        except RuntimeError:
+            # 没有事件循环在运行，可以创建一个新的
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            success = loop.run_until_complete(generate_speech_async(clean_text, voice, output_file))
+            loop.close()
         
         if success:
             return output_file
@@ -176,6 +184,16 @@ def text_to_speech(text, style="normal"):
         if os.path.exists(output_file):
             os.unlink(output_file)
         return None
+
+# 添加辅助函数在线程中运行异步代码
+def _run_in_thread(text, voice, output_file):
+    """在线程中运行事件循环，避免与主事件循环冲突"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(generate_speech_async(text, voice, output_file))
+    finally:
+        loop.close()
 
 # 测试代码
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import os
 import asyncio
 import base64
 import json
+import shutil
 from typing import List, Optional, Dict, Any
 import time
 from datetime import datetime
@@ -122,8 +123,11 @@ async def chat(
                         # 确保目录存在
                         os.makedirs(os.path.dirname(static_path), exist_ok=True)
                         
-                        # 复制临时文件到静态目录
-                        os.rename(audio_path, static_path)
+                        # 不能跨磁盘移动文件
+                        # os.rename(audio_path, static_path)
+                        shutil.copy2(audio_path, static_path)
+                        # 复制后删除原文件
+                        os.unlink(audio_path)
                         
                         # 设置音频URL
                         audio_url = f"/audio/{filename}"
@@ -224,7 +228,9 @@ async def stream_chat(request: ExtendedChatRequest):
                                 os.makedirs(os.path.dirname(static_path), exist_ok=True)
                                 
                                 # 复制临时文件到静态目录
-                                os.rename(audio_path, static_path)
+                                shutil.copy2(audio_path, static_path)
+                                # 复制后删除原文件
+                                os.unlink(audio_path)
                                 
                                 # 发送音频URL给客户端
                                 audio_url = f"/audio/{filename}"
@@ -251,7 +257,9 @@ async def stream_chat(request: ExtendedChatRequest):
                             os.makedirs(os.path.dirname(static_path), exist_ok=True)
                             
                             # 复制临时文件到静态目录
-                            os.rename(audio_path, static_path)
+                            shutil.copy2(audio_path, static_path)
+                            # 复制后删除原文件
+                            os.unlink(audio_path)
                             
                             # 设置最终音频URL
                             audio_url = f"/audio/{filename}"
@@ -292,7 +300,9 @@ async def generate_tts(request: TextToSpeechRequest):
         os.makedirs(os.path.dirname(static_path), exist_ok=True)
         
         # 复制文件
-        os.rename(audio_path, static_path)
+        shutil.copy2(audio_path, static_path)
+        # 复制后删除原文件
+        os.unlink(audio_path)
         
         # 返回URL
         return {"audio_url": f"/audio/{filename}"}

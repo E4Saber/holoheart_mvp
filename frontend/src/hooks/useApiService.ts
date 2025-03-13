@@ -202,15 +202,24 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
                 // 音频片段可用
                 const audioUrlFragment = data.audio_url;
                 
-                // 如果提供了音频回调或音频管理器，处理音频
                 if (audioUrlFragment) {
+                  // 构建完整URL
+                  const fullAudioUrl = audioUrlFragment.startsWith('http') 
+                    ? audioUrlFragment 
+                    : `${apiUrl}${audioUrlFragment}`;
+                  
+                  // 先加入队列
                   if (onAudioAvailable && typeof onAudioAvailable === 'function') {
-                    onAudioAvailable(audioUrlFragment);
+                    onAudioAvailable(fullAudioUrl);
                   }
                   
-                  // 如果提供了音频管理器，自动播放音频
+                  // 确保完整URL传递给音频管理器
                   if (audioManager) {
-                    audioManager.playAudioFromUrl(audioUrlFragment);
+                    console.log("Playing audio from URL:", fullAudioUrl);
+                    // 引入延迟确保服务器有时间处理文件
+                    setTimeout(() => {
+                      audioManager.playAudioFromUrl(fullAudioUrl);
+                    }, 500);
                   }
                 }
               } else if (data.type === 'end') {

@@ -63,6 +63,8 @@ export const useAudioManager = (apiUrl: string = ''): AudioManager => {
   const playAudioFromUrl = (audioUrl: string): void => {
     // 追踪音频文件
     const fullUrl = audioUrl.startsWith('http') ? audioUrl : `${baseUrl}${audioUrl}`;
+
+    console.log("Playing audio from URL:", fullUrl);
     
     // 添加到文件列表
     if (!audioFiles.includes(fullUrl)) {
@@ -84,20 +86,30 @@ export const useAudioManager = (apiUrl: string = ''): AudioManager => {
    * 播放队列中的下一个音频
    */
   const playNextInQueue = (): void => {
-    if (queue.length === 0 || !audioRef.current) return;
+    if (queue.length === 0 || !audioRef.current) {
+      console.log("Queue empty or audio ref not available");
+      return;
+    }
     
     const nextAudio = queue[0];
+    console.log("Now playing from queue:", nextAudio);
     setQueue(prev => prev.slice(1));
     
     setCurrentAudio(nextAudio);
     audioRef.current.src = nextAudio;
+    audioRef.current.load(); // 确保加载
+
     audioRef.current.play()
-      .then(() => setIsPlaying(true))
-      .catch(error => {
-        console.error("音频播放失败:", error);
-        setIsPlaying(false);
-        playNextInQueue(); // 尝试播放下一个
-      });
+    .then(() => {
+      console.log("Audio playback started successfully");
+      setIsPlaying(true);
+    })
+    .catch(error => {
+      console.error("Audio playback failed:", error);
+      setIsPlaying(false);
+      // 尝试播放下一个
+      playNextInQueue();
+    });
   };
 
   /**
