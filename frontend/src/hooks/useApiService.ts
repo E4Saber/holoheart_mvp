@@ -1,20 +1,35 @@
 // src/hooks/useApiService.ts
 import { useRef, useEffect } from 'react';
-import { Message } from '../pages/HomePage';
+import { AudioManager } from './useAudioManager';
+
+interface RequestParams {
+  message: string;
+  conversation_id: string;
+  stream: boolean;
+  tts_enabled: boolean;
+  voice_style: string;
+  load_memories: boolean;
+}
+
+interface ApiMessage {
+  role: string;
+  content: string;
+}
 
 interface ApiService {
-  chat: (message: string, history?: Message[]) => Promise<{text: string, audioUrl?: string}>;
+  chat: (params: RequestParams, history?: ApiMessage[]) => Promise<{text: string, audioUrl?: string}>;
   streamChat: (
-    message: string, 
-    history?: Message[], 
-    onChunk?: (chunk: string, fullResponse: string) => void
+    params: RequestParams, 
+    history?: ApiMessage[], 
+    onChunk?: (chunk: string, fullResponse: string) => void,
+    onAudioAvailable?: (audioUrl: string) => void
   ) => Promise<{text: string, audioUrl?: string}>;
 }
 
 /**
  * API服务钩子，处理与后端API的通信
  */
-export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
+export const useApiService = (apiKey: string, apiUrl: string, audioManager?: AudioManager): ApiService => {
   const controller = useRef<AbortController | null>(null);
   
   // 在组件卸载时取消任何正在进行的请求
@@ -42,7 +57,10 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
   /**
    * 执行非流式聊天请求
    */
-  const chat = async (message: string, history: Message[] = []): Promise<{text: string, audioUrl?: string}> => {
+  const chat = async (
+    params: RequestParams, 
+    history: ApiMessage[] = []
+  ): Promise<{text: string, audioUrl?: string}> => {
     validateConfig();
     
     // 取消之前的请求（如果有）
@@ -55,13 +73,10 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
     const signal = controller.current.signal;
     
     try {
-      // 准备请求体 - 适配后端API格式
+      // 准备请求体
       const requestBody = {
-        message: message,
-        conversation_id: Date.now().toString(), // 生成唯一会话ID
-        stream: false,
-        tts_enabled: true,
-        voice_style: "normal" // 默认风格，可以从settings传入
+        ...params,
+        history: history
       };
       
       // 发送请求到后端
@@ -84,6 +99,11 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
       // 解析响应
       const responseData = await response.json();
       
+      // 如果有音频URL且提供了音频管理器，自动播放音频
+      if (responseData.audio_url && audioManager) {
+        audioManager.playAudioFromUrl(responseData.audio_url);
+      }
+      
       return {
         text: responseData.assistant_message.content,
         audioUrl: responseData.audio_url
@@ -101,9 +121,10 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
    * 执行流式聊天请求
    */
   const streamChat = async (
-    message: string, 
-    history: Message[] = [], 
-    onChunk?: (chunk: string, fullResponse: string) => void
+    params: RequestParams,
+    history: ApiMessage[] = [], 
+    onChunk?: (chunk: string, fullResponse: string) => void,
+    onAudioAvailable?: (audioUrl: string) => void
   ): Promise<{text: string, audioUrl?: string}> => {
     validateConfig();
     
@@ -117,13 +138,10 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
     const signal = controller.current.signal;
     
     try {
-      // 准备请求体 - 适配后端API格式
+      // 准备请求体
       const requestBody = {
-        message: message,
-        conversation_id: Date.now().toString(),
-        stream: true,
-        tts_enabled: true,
-        voice_style: "normal" // 默认风格，可以从settings传入
+        ...params,
+        history: history
       };
       
       // 发送请求到后端流式端点
@@ -180,9 +198,29 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
                     onChunk(content, completeResponse);
                   }
                 }
+              } else if (data.type === 'audio') {
+                // 音频片段可用
+                const audioUrlFragment = data.audio_url;
+                
+                // 如果提供了音频回调或音频管理器，处理音频
+                if (audioUrlFragment) {
+                  if (onAudioAvailable && typeof onAudioAvailable === 'function') {
+                    onAudioAvailable(audioUrlFragment);
+                  }
+                  
+                  // 如果提供了音频管理器，自动播放音频
+                  if (audioManager) {
+                    audioManager.playAudioFromUrl(audioUrlFragment);
+                  }
+                }
               } else if (data.type === 'end') {
-                // 结束事件，可能包含音频URL
+                // 结束事件，可能包含最终音频URL
                 audioUrl = data.audio_url;
+                
+                // 如果有最终音频URL且之前未处理，且提供了音频管理器，自动播放
+                if (audioUrl && !audioManager?.audioFiles.includes(audioUrl) && audioManager) {
+                  audioManager.playAudioFromUrl(audioUrl);
+                }
               } else if (data.type === 'error') {
                 // 错误事件
                 throw new Error(data.content || '处理请求时出错');

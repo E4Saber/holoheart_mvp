@@ -30,7 +30,7 @@ const ChatTab: React.FC<ChatTabProps> = ({
 }) => {
   const [message, setMessage] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
 
   // 当对话更新时滚动到底部
   useEffect(() => {
@@ -48,7 +48,7 @@ const ChatTab: React.FC<ChatTabProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     setMessage(e.target.value);
   };
 
@@ -59,7 +59,8 @@ const ChatTab: React.FC<ChatTabProps> = ({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+  // 修改为接受HTMLDivElement的键盘事件
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -151,7 +152,7 @@ const ChatTab: React.FC<ChatTabProps> = ({
                       <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
                         <IconButton 
                           size="small" 
-                          onClick={() => audioManager.addToQueue(apiUrl + msg.audioPath)}
+                          onClick={() => audioManager.playAudioFromUrl(apiUrl + msg.audioPath)}
                           sx={{ fontSize: '0.75rem' }}
                         >
                           🔊 播放语音

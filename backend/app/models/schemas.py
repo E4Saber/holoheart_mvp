@@ -5,7 +5,7 @@ from uuid import uuid4
 
 class ChatMessage(BaseModel):
     """聊天消息模型"""
-    role: str  # "user" 或 "assistant"
+    role: str  # "user" 或 "assistant" 或 "system"
     content: str
     timestamp: str = Field(default_factory=lambda: datetime.now().strftime("%H:%M:%S"))
     audio_path: Optional[str] = None
@@ -17,6 +17,8 @@ class ChatRequest(BaseModel):
     stream: bool = False
     tts_enabled: bool = True
     voice_style: str = "normal"
+    load_memories: bool = False
+    history: Optional[List[Dict[str, str]]] = []
 
 class ChatResponse(BaseModel):
     """聊天响应模型"""

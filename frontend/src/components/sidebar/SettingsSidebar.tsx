@@ -106,11 +106,34 @@ const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   };
 
   // 试听语音样本
-  const handleTestVoice = (): void => {
+  const handleTestVoice = async (): Promise<void> => {
     try {
       const sampleText = "这是一个示例语音，您可以使用此风格与AI助手交流。";
-      audioManager.generateSpeech(sampleText, settings.voiceStyle);
-      showAlertMessage('正在播放语音样本', 'info');
+      
+      // 调用后端TTS API生成语音
+      const response = await fetch(`${settings.apiUrl}/api/tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text: sampleText,
+          voice_style: settings.voiceStyle
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败，状态码: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      if (data.audio_url) {
+        // 使用音频管理器播放
+        audioManager.playAudioFromUrl(data.audio_url);
+        showAlertMessage('正在播放语音样本', 'info');
+      } else {
+        throw new Error('未能获取音频URL');
+      }
     } catch (error) {
       showAlertMessage(`无法播放语音样本: ${(error as Error).message}`, 'error');
     }

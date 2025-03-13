@@ -5,7 +5,7 @@ import os
 import asyncio
 import base64
 import json
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import time
 from datetime import datetime
 from uuid import uuid4
@@ -34,10 +34,15 @@ kimi_api_client = KimiAPI()
 # 初始化音频文件管理器
 audio_file_manager = AudioFileManager(temp_dir=settings.AUDIO_FILES_DIR)
 
+# 扩展的聊天请求格式，包含会话历史
+class ExtendedChatRequest(ChatRequest):
+    history: Optional[List[Dict[str, str]]] = []
+    load_memories: bool = False
+
 # 聊天端点
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat(
-    request: ChatRequest,
+    request: ExtendedChatRequest,
     background_tasks: BackgroundTasks
 ):
     """处理聊天请求并返回响应"""
@@ -57,10 +62,34 @@ async def chat(
                 detail="流式请求应使用 /chat/stream 端点"
             )
         else:
-            # 如果可用，从记忆系统获取历史记录
-            conversation_history = []
-            memory_system = get_memory_system()
-            # TODO: 实现历史检索
+            # 处理会话历史
+            conversation_history = request.history or []
+            
+            # 如果启用了记忆加载，从记忆系统获取相关历史
+            if request.load_memories:
+                memory_system = get_memory_system()
+                relevant_memories = await memory_system.search(
+                    query=request.message,
+                    limit=5  # 获取最相关的5条记忆
+                )
+                
+                # 如果找到相关记忆，添加到历史中
+                if relevant_memories:
+                    for memory in relevant_memories:
+                        # 添加一个系统消息，标记这是来自记忆的内容
+                        conversation_history.append({
+                            "role": "system",
+                            "content": f"以下是相关的历史对话: {memory.get('summary', '')}"
+                        })
+                        
+                        # 可选：添加记忆中的实际消息
+                        memory_messages = memory.get("messages", [])
+                        for msg in memory_messages[:3]:  # 仅添加前3条消息，避免太长
+                            if isinstance(msg, dict):
+                                conversation_history.append({
+                                    "role": msg.get("role", "user"),
+                                    "content": msg.get("content", "")
+                                })
             
             # 通过Kimi API处理请求
             response_text = kimi_api_client.chat(
@@ -108,14 +137,6 @@ async def chat(
                                 request.voice_style
                             )
             
-            # 保存对话到记忆系统
-            conversation = [user_message.dict(), assistant_message.dict()]
-            background_tasks.add_task(
-                save_conversation_to_memory,
-                request.conversation_id,
-                conversation
-            )
-            
             # 返回响应
             return ChatResponse(
                 conversation_id=request.conversation_id,
@@ -127,45 +148,74 @@ async def chat(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"聊天处理失败: {str(e)}")
 
-# 流式聊天端点
+# 流式聊天端点 - 修改部分
 @api_router.post("/chat/stream")
-async def stream_chat(request: ChatRequest):
-    """处理流式聊天请求并返回流式响应"""
+async def stream_chat(request: ExtendedChatRequest):
+    """处理流式聊天请求并返回流式响应，同时生成音频片段"""
     try:
         # 创建流式响应
         async def event_generator():
             # 初始化记录完整响应的变量
             full_response = ""
+            accumulated_text = ""  # 用于累积足够长度的文本以生成语音
+            
+            # 处理会话历史
+            conversation_history = request.history or []
+            
+            # 如果启用了记忆加载，从记忆系统获取相关历史
+            if request.load_memories:
+                memory_system = get_memory_system()
+                relevant_memories = await memory_system.search(
+                    query=request.message,
+                    limit=5  # 获取最相关的5条记忆
+                )
+                
+                # 如果找到相关记忆，添加到历史中
+                if relevant_memories:
+                    for memory in relevant_memories:
+                        # 添加一个系统消息，标记这是来自记忆的内容
+                        conversation_history.append({
+                            "role": "system",
+                            "content": f"以下是相关的历史对话: {memory.get('summary', '')}"
+                        })
+                        
+                        # 可选：添加记忆中的实际消息
+                        memory_messages = memory.get("messages", [])
+                        for msg in memory_messages[:3]:  # 仅添加前3条消息，避免太长
+                            if isinstance(msg, dict):
+                                conversation_history.append({
+                                    "role": msg.get("role", "user"),
+                                    "content": msg.get("content", "")
+                                })
             
             # 流式调用Kimi API
             async for chunk in kimi_api_client.stream_chat(
                 message=request.message,
-                history=[]  # TODO: 实现历史检索
+                history=conversation_history
             ):
                 # 根据块类型处理
                 if chunk.get("type") == "chunk":
                     content = chunk.get("content", "")
                     full_response += content
+                    accumulated_text += content
+                    
+                    # 发送文本块给客户端
                     yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
-                elif chunk.get("type") == "tool_call":
-                    yield f"data: {json.dumps({'type': 'tool_call', 'content': '正在搜索相关信息...'})}\n\n"
-                elif chunk.get("type") == "error":
-                    yield f"data: {json.dumps({'type': 'error', 'content': chunk.get('error', '发生错误')})}\n\n"
-                    return
-                elif chunk.get("type") == "end":
-                    # 处理TTS（如果启用）
-                    audio_url = None
-                    if request.tts_enabled and full_response:
-                        # 清理并分割文本用于TTS
-                        cleaned_text = clean_text_for_tts(full_response)
-                        text_segments = split_text_for_tts(cleaned_text)
-                        
-                        # 为第一段生成TTS
-                        if text_segments:
-                            audio_path = text_to_speech(text_segments[0], request.voice_style)
+                    
+                    # 如果启用了TTS并积累了足够长度的文本，生成语音
+                    if request.tts_enabled and accumulated_text:
+                        # 检查积累的文本是否包含完整句子
+                        sentence_end = find_sentence_end(accumulated_text)
+                        if sentence_end > 10:  # 确保句子足够长
+                            # 提取完整句子
+                            sentence = accumulated_text[:sentence_end+1]
+                            accumulated_text = accumulated_text[sentence_end+1:]
+                            
+                            # 生成TTS
+                            audio_path = text_to_speech(sentence, request.voice_style)
                             if audio_path:
                                 # 保存文件到静态目录
-                                filename = f"response_{uuid4()}.mp3"
+                                filename = f"chunk_{uuid4()}.mp3"
                                 static_path = os.path.join(settings.AUDIO_FILES_DIR, filename)
                                 
                                 # 确保目录存在
@@ -174,30 +224,38 @@ async def stream_chat(request: ChatRequest):
                                 # 复制临时文件到静态目录
                                 os.rename(audio_path, static_path)
                                 
-                                # 设置音频URL
+                                # 发送音频URL给客户端
                                 audio_url = f"/audio/{filename}"
-                                
-                                # 处理剩余段落
-                                # 注意：这里没有使用BackgroundTasks，因为这已经是异步函数
-                                if len(text_segments) > 1:
-                                    asyncio.create_task(
-                                        process_remaining_tts_async(
-                                            text_segments[1:],
-                                            request.voice_style
-                                        )
-                                    )
-                    
-                    # 保存对话到记忆系统
-                    conversation = [
-                        {"role": "user", "content": request.message, "timestamp": datetime.now().strftime("%H:%M:%S")},
-                        {"role": "assistant", "content": full_response, "timestamp": datetime.now().strftime("%H:%M:%S"), "audio_path": audio_url}
-                    ]
-                    asyncio.create_task(
-                        save_conversation_to_memory(
-                            request.conversation_id,
-                            conversation
-                        )
-                    )
+                                yield f"data: {json.dumps({'type': 'audio', 'audio_url': audio_url})}\n\n"
+                
+                elif chunk.get("type") == "tool_call":
+                    yield f"data: {json.dumps({'type': 'tool_call', 'content': '正在搜索相关信息...'})}\n\n"
+                
+                elif chunk.get("type") == "error":
+                    yield f"data: {json.dumps({'type': 'error', 'content': chunk.get('error', '发生错误')})}\n\n"
+                    return
+                
+                elif chunk.get("type") == "end":
+                    # 如果还有未处理的文本，生成最后的音频
+                    audio_url = None
+                    if request.tts_enabled and accumulated_text:
+                        audio_path = text_to_speech(accumulated_text, request.voice_style)
+                        if audio_path:
+                            # 保存文件到静态目录
+                            filename = f"final_{uuid4()}.mp3"
+                            static_path = os.path.join(settings.AUDIO_FILES_DIR, filename)
+                            
+                            # 确保目录存在
+                            os.makedirs(os.path.dirname(static_path), exist_ok=True)
+                            
+                            # 复制临时文件到静态目录
+                            os.rename(audio_path, static_path)
+                            
+                            # 设置最终音频URL
+                            audio_url = f"/audio/{filename}"
+                            
+                            # 发送最后一个音频URL给客户端
+                            yield f"data: {json.dumps({'type': 'audio', 'audio_url': audio_url})}\n\n"
                     
                     # 发送完成事件
                     yield f"data: {json.dumps({'type': 'end', 'audio_url': audio_url})}\n\n"
@@ -207,6 +265,21 @@ async def stream_chat(request: ChatRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"流式聊天处理失败: {str(e)}")
+
+# 辅助函数：查找句子结束位置
+def find_sentence_end(text: str) -> int:
+    """查找文本中句子的结束位置"""
+    end_chars = ["。", "？", "！", ".", "?", "!"]
+    positions = [text.find(char) for char in end_chars]
+    valid_positions = [pos for pos in positions if pos != -1]
+    
+    if valid_positions:
+        return min(valid_positions)
+    else:
+        # 如果没有找到句号等标点，但文本已经足够长，也可以直接返回
+        if len(text) > 50:
+            return len(text) - 1
+        return -1
 
 # 文本到语音端点
 @api_router.post("/tts")
@@ -432,16 +505,3 @@ def process_remaining_tts(text_segments, voice_style):
         loop.run_until_complete(process_remaining_tts_async(text_segments, voice_style))
     finally:
         loop.close()
-
-# 保存对话到记忆系统
-async def save_conversation_to_memory(conversation_id, conversation):
-    """保存对话到记忆系统"""
-    try:
-        memory_system = get_memory_system()
-        await memory_system.save_conversation(
-            conversation_history=conversation,
-            summary=None,  # 自动生成摘要
-            tags=[]  # 没有标签
-        )
-    except Exception as e:
-        print(f"保存对话到记忆系统失败: {str(e)}")

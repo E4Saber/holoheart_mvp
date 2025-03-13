@@ -1,6 +1,6 @@
 // src/pages/HomePage.tsx
 import React, { useState, useEffect } from 'react';
-import { Tabs, Tab, Box, Typography, useTheme } from '@mui/material';
+import { Tabs, Tab, Box, Typography, useTheme, FormControlLabel, Switch } from '@mui/material';
 import ChatTab from '../components/chat/ChatTab';
 import MemoryTab from '../components/memory/MemoryTab';
 import SettingsSidebar from '../components/sidebar/SettingsSidebar';
@@ -16,6 +16,7 @@ export interface Message {
   timestamp: string;
   isError?: boolean;
   audioPath?: string;
+  isTyping?: boolean;
 }
 
 // 定义设置类型
@@ -48,7 +49,7 @@ const HomePage: React.FC = () => {
   // 从服务中获取钩子实例
   const audioManager = useAudioManager(settings.apiUrl);
   const memorySystem = useMemorySystem(settings.apiUrl);
-  const apiService = useApiService(settings.apiKey, settings.apiUrl);
+  const apiService = useApiService(settings.apiKey, settings.apiUrl, audioManager);
 
   // 当设置变更时保存到localStorage
   useEffect(() => {
@@ -64,7 +65,11 @@ const HomePage: React.FC = () => {
   useEffect(() => {
     const savedConversations = localStorage.getItem('conversations');
     if (savedConversations) {
-      setConversations(JSON.parse(savedConversations));
+      try {
+        setConversations(JSON.parse(savedConversations));
+      } catch (e) {
+        console.error("Failed to parse saved conversations:", e);
+      }
     }
   }, []);
 
@@ -114,59 +119,113 @@ const HomePage: React.FC = () => {
     setIsResponding(true);
     
     try {
-      // 重置音频管理器的句子位置，开始新回复的处理
-      audioManager.resetTextPosition();
+      // 准备请求参数，包括历史会话和记忆加载选项
+      const requestParams = {
+        message,
+        conversation_id: `conv_${Date.now()}`,
+        stream: settings.streamMode,
+        tts_enabled: settings.ttsEnabled,
+        voice_style: settings.voiceStyle,
+        load_memories: settings.loadMemories
+      };
       
-      let response;
+      // 准备历史会话
+      const history = conversations.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      
+      let assistantResponse = '';
+      let finalAudioUrl: string | undefined;
       
       if (settings.streamMode) {
         // 流式响应处理
-        response = await apiService.streamChat(
-          message,
-          conversations,
+        const streamResult = await apiService.streamChat(
+          requestParams,
+          history,
           (chunk, fullResponse) => {
-            // 如果启用TTS，处理文本到语音的转换
-            if (settings.ttsEnabled) {
-              audioManager.processStreamingText(fullResponse, settings.voiceStyle);
-            }
+            // 累积完整响应文本
+            assistantResponse = fullResponse;
+            
+            // 更新AI正在打字的显示
+            setConversations(prev => {
+              const newConversations = [...prev];
+              // 查找或添加assistantMessage
+              const lastMsg = newConversations[newConversations.length - 1];
+              if (lastMsg.role === 'assistant' && lastMsg.isTyping) {
+                // 更新正在输入的消息
+                newConversations[newConversations.length - 1] = {
+                  ...lastMsg,
+                  content: fullResponse
+                };
+              } else {
+                // 添加新的assistant消息
+                newConversations.push({
+                  role: 'assistant',
+                  content: fullResponse,
+                  timestamp: new Date().toISOString(),
+                  isTyping: true
+                });
+              }
+              return newConversations;
+            });
+          },
+          (audioUrl) => {
+            // 后端自动生成并返回了音频URL，前端不需要处理
+            // 音频将通过audioManager直接播放
+            finalAudioUrl = audioUrl; // 保存最新的音频URL
           }
         );
+        
+        // 使用函数返回的最终值更新
+        assistantResponse = streamResult.text;
+        finalAudioUrl = finalAudioUrl || streamResult.audioUrl;
       } else {
         // 非流式响应
-        response = await apiService.chat(message, conversations);
-        
-        // 如果有音频URL，添加到音频管理器
-        if (settings.ttsEnabled && response.audioUrl) {
-          audioManager.addToQueue(settings.apiUrl + response.audioUrl);
-        }
+        const response = await apiService.chat(requestParams, history);
+        assistantResponse = response.text;
+        finalAudioUrl = response.audioUrl;
       }
       
-      // 添加AI响应到对话
-      if (response.text) {
-        const assistantMessage: Message = {
-          role: 'assistant',
-          content: response.text,
-          timestamp: new Date().toISOString(),
-          audioPath: response.audioUrl
-        };
-        
-        setConversations(prev => [...prev, assistantMessage]);
+      // 添加最终AI响应到对话
+      if (assistantResponse) {
+        // 移除临时的"正在输入"消息，添加最终消息
+        setConversations(prev => {
+          const filteredConversations = prev.filter(msg => !msg.isTyping);
+          return [
+            ...filteredConversations,
+            {
+              role: 'assistant',
+              content: assistantResponse,
+              timestamp: new Date().toISOString(),
+              audioPath: finalAudioUrl
+            }
+          ];
+        });
       }
     } catch (error) {
       console.error('处理消息时出错:', error);
       // 添加错误消息
-      setConversations(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `发生错误: ${(error as Error).message || '无法处理您的请求'}`,
-          timestamp: new Date().toISOString(),
-          isError: true
-        }
-      ]);
+      setConversations(prev => {
+        // 移除任何临时的"正在输入"消息
+        const filteredConversations = prev.filter(msg => !msg.isTyping);
+        return [
+          ...filteredConversations,
+          {
+            role: 'assistant',
+            content: `发生错误: ${(error as Error).message || '无法处理您的请求'}`,
+            timestamp: new Date().toISOString(),
+            isError: true
+          }
+        ];
+      });
     } finally {
       setIsResponding(false);
     }
+  };
+
+  const handleLoadMemoriesToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+    updateSettings({ loadMemories: event.target.checked });
   };
 
   return (
@@ -189,9 +248,23 @@ const HomePage: React.FC = () => {
           height: '100vh',
           bgcolor: theme.palette.background.default
         }}>
-          <Typography variant="h4" component="h1" sx={{ padding: '20px 20px 0 20px', fontWeight: 'bold' }}>
-            🤖 AI全息角色系统
-          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: '20px 20px 0 20px' }}>
+            <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold' }}>
+              🤖 AI全息角色系统
+            </Typography>
+            
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={settings.loadMemories}
+                  onChange={handleLoadMemoriesToggle}
+                  color="primary"
+                />
+              }
+              label="启用记忆"
+              sx={{ ml: 2 }}
+            />
+          </Box>
           
           <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}>
             <Tabs value={currentTab} onChange={handleTabChange}>
@@ -208,6 +281,7 @@ const HomePage: React.FC = () => {
                 onSendMessage={handleSendMessage}
                 apiKey={settings.apiKey}
                 audioManager={audioManager}
+                apiUrl={settings.apiUrl}
               />
             )}
             
