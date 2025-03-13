@@ -10,10 +10,10 @@ from typing import Dict, Optional, List, Any, Union, BinaryIO
 from pathlib import Path
 import base64
 
-from app.core.config import settings
+from app.config.config import settings
 
 # 定义语音识别服务类
-class SpeechRecognition:
+class SpeechRecognizer:
     """语音识别服务，提供本地和远程混合模式"""
     
     def __init__(self, models_dir: Optional[Path] = None):
@@ -421,11 +421,11 @@ class SpeechRecognition:
 # 单例模式
 _speech_service = None
 
-def get_speech_service() -> SpeechRecognitionService:
+def get_speech_service() -> SpeechRecognizer:
     """获取语音识别服务单例"""
     global _speech_service
     if _speech_service is None:
-        _speech_service = SpeechRecognitionService()
+        _speech_service = SpeechRecognizer()
     return _speech_service
 
 async def initialize_speech_system() -> bool:

@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
-from app.core.config import settings
+from app.config.config import settings
 
 class MemoryManager:
     """记忆系统类，管理对话历史记录和记忆检索"""
@@ -435,11 +435,11 @@ class MemoryManager:
 # 单例模式
 _memory_system = None
 
-def get_memory_system() -> MemorySystem:
+def get_memory_system() -> MemoryManager:
     """获取记忆系统单例"""
     global _memory_system
     if _memory_system is None:
-        _memory_system = MemorySystem()
+        _memory_system = MemoryManager()
     return _memory_system
 
 async def initialize_memory_system():

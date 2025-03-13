@@ -167,11 +167,11 @@ class AudioManager:
 # 单例模式
 _audio_manager = None
 
-def get_audio_manager() -> AudioQueueManager:
+def get_audio_manager() -> AudioManager:
     """获取全局音频管理器实例"""
     global _audio_manager
     if _audio_manager is None:
-        _audio_manager = AudioQueueManager()
+        _audio_manager = AudioManager()
     return _audio_manager
 
 async def initialize_audio_system():
