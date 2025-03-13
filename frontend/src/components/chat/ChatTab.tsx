@@ -5,6 +5,7 @@ import SendIcon from '@mui/icons-material/Send';
 import ReactMarkdown from 'react-markdown';
 import { Message } from '../../pages/HomePage';
 import { AudioManager } from '../../hooks/useAudioManager';
+import SpeechRecognitionButton from '../speech/SpeechRecognitionButton';
 import './ChatTab.css';
 
 interface ChatTabProps {
@@ -13,6 +14,7 @@ interface ChatTabProps {
   onSendMessage: (message: string) => Promise<void>;
   apiKey: string;
   audioManager: AudioManager;
+  apiUrl?: string;
 }
 
 /**
@@ -23,7 +25,8 @@ const ChatTab: React.FC<ChatTabProps> = ({
   isResponding, 
   onSendMessage, 
   apiKey, 
-  audioManager 
+  audioManager,
+  apiUrl = ''
 }) => {
   const [message, setMessage] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -63,9 +66,28 @@ const ChatTab: React.FC<ChatTabProps> = ({
     }
   };
 
+  const handleSpeechResult = (text: string): void => {
+    setMessage(prevMessage => {
+      // 如果当前输入框有文本，在后面添加新文本
+      if (prevMessage.trim()) {
+        return `${prevMessage} ${text}`;
+      }
+      return text;
+    });
+    
+    // 聚焦输入框以便用户继续编辑
+    if (messageInputRef.current) {
+      messageInputRef.current.focus();
+    }
+  };
+
   const formatTimestamp = (timestamp: string): string => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return timestamp;
+    }
   };
 
   return (
@@ -123,6 +145,19 @@ const ChatTab: React.FC<ChatTabProps> = ({
                 ) : (
                   <Box className="markdown-container">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    
+                    {/* 如果有音频路径，显示播放按钮 */}
+                    {msg.audioPath && (
+                      <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                        <IconButton 
+                          size="small" 
+                          onClick={() => audioManager.addToQueue(apiUrl + msg.audioPath)}
+                          sx={{ fontSize: '0.75rem' }}
+                        >
+                          🔊 播放语音
+                        </IconButton>
+                      </Box>
+                    )}
                   </Box>
                 )}
                 <Typography variant="caption" className="message-timestamp">
@@ -165,6 +200,15 @@ const ChatTab: React.FC<ChatTabProps> = ({
           size="small"
           sx={{ bgcolor: 'background.paper' }}
         />
+        
+        {/* 语音识别按钮 */}
+        <SpeechRecognitionButton
+          apiUrl={apiUrl}
+          apiKey={apiKey}
+          onResult={handleSpeechResult}
+          disabled={isResponding || !apiKey}
+        />
+        
         <IconButton 
           color="primary" 
           onClick={handleSendMessage} 

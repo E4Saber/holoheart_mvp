@@ -20,13 +20,15 @@ interface AudioStatus {
 /**
  * 音频管理器钩子，处理语音的生成、播放和管理
  */
-export const useAudioManager = (): AudioManager => {
+export const useAudioManager = (apiUrl: string = ''): AudioManager => {
   const [audioFiles, setAudioFiles] = useState<string[]>([]);
   const [currentAudio, setCurrentAudio] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [queue, setQueue] = useState<string[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const lastSentenceEndRef = useRef<number>(0);
+  
+  const baseUrl = apiUrl || window.location.origin;
 
   // 初始化音频元素
   useEffect(() => {
@@ -66,7 +68,7 @@ export const useAudioManager = (): AudioManager => {
     let sentenceEnd = -1;
     
     for (const char of endChars) {
-      const pos = text.indexOf(char);
+      const pos = text.indexOf(char, lastSentenceEndRef.current);
       if (pos !== -1 && (sentenceEnd === -1 || pos < sentenceEnd)) {
         sentenceEnd = pos;
       }
@@ -82,7 +84,7 @@ export const useAudioManager = (): AudioManager => {
     const currentLength = text.length;
     
     // 确保有足够的新文本
-    if (currentLength - lastSentenceEndRef.current < 30) {
+    if (currentLength <= lastSentenceEndRef.current || currentLength - lastSentenceEndRef.current < 10) {
       return;
     }
     
@@ -103,21 +105,36 @@ export const useAudioManager = (): AudioManager => {
    */
   const generateSpeech = async (text: string, voiceStyle: string): Promise<string | null> => {
     try {
-      // 实际项目中，这里应该调用TTS服务
-      // 此处为模拟实现，实际开发中替换为真实API调用
-      console.log(`Generating speech for: "${text}" with style "${voiceStyle}"`);
+      // 调用后端TTS接口
+      const response = await fetch(`${baseUrl}/api/tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text: text,
+          voice_style: voiceStyle
+        })
+      });
       
-      // 模拟API调用延迟
-      await new Promise(resolve => setTimeout(resolve, 300));
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `TTS请求失败，状态码: ${response.status}`);
+      }
       
-      // 模拟返回音频URL (实际开发中应使用真实的API响应)
-      const mockAudioUrl = `/api/tts?text=${encodeURIComponent(text)}&style=${voiceStyle}&timestamp=${Date.now()}`;
+      const data = await response.json();
+      const audioUrl = data.audio_url;
+      
+      if (!audioUrl) {
+        throw new Error('没有收到有效的音频URL');
+      }
       
       // 将生成的音频添加到文件列表和播放队列
-      setAudioFiles(prev => [...prev, mockAudioUrl]);
-      addToQueue(mockAudioUrl);
+      const fullUrl = audioUrl.startsWith('http') ? audioUrl : `${baseUrl}${audioUrl}`;
+      setAudioFiles(prev => [...prev, fullUrl]);
+      addToQueue(fullUrl);
       
-      return mockAudioUrl;
+      return fullUrl;
     } catch (error) {
       console.error("语音生成失败:", error);
       return null;

@@ -38,7 +38,7 @@ const HomePage: React.FC = () => {
   const [isResponding, setIsResponding] = useState<boolean>(false);
   const [settings, setSettings] = useState<Settings>({
     apiKey: localStorage.getItem('apiKey') || '',
-    apiUrl: localStorage.getItem('apiUrl') || 'https://api.moonshot.cn/v1',
+    apiUrl: localStorage.getItem('apiUrl') || 'http://localhost:8000',
     streamMode: localStorage.getItem('streamMode') !== 'false',
     ttsEnabled: localStorage.getItem('ttsEnabled') !== 'false',
     voiceStyle: localStorage.getItem('voiceStyle') || 'normal',
@@ -46,8 +46,8 @@ const HomePage: React.FC = () => {
   });
 
   // 从服务中获取钩子实例
-  const audioManager = useAudioManager();
-  const memorySystem = useMemorySystem();
+  const audioManager = useAudioManager(settings.apiUrl);
+  const memorySystem = useMemorySystem(settings.apiUrl);
   const apiService = useApiService(settings.apiKey, settings.apiUrl);
 
   // 当设置变更时保存到localStorage
@@ -88,8 +88,7 @@ const HomePage: React.FC = () => {
   // 保存当前对话到记忆系统
   const saveCurrentConversation = async (): Promise<boolean> => {
     if (conversations.length > 0) {
-      await memorySystem.saveConversation(conversations);
-      return true;
+      return await memorySystem.saveConversation(conversations);
     }
     return false;
   };
@@ -115,62 +114,43 @@ const HomePage: React.FC = () => {
     setIsResponding(true);
     
     try {
-      // 准备对话历史
-      const history = conversations.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
+      // 重置音频管理器的句子位置，开始新回复的处理
+      audioManager.resetTextPosition();
       
-      // 根据settings.loadMemories的设置加载相关记忆
-      let contextWithMemories = [...history];
-      if (settings.loadMemories && message) {
-        const relevantMemories = await memorySystem.retrieveMemories(message);
-        if (relevantMemories && relevantMemories.length > 0) {
-          // 将记忆作为系统消息添加到上下文
-          contextWithMemories = [
-            { 
-              role: 'system', 
-              content: `相关记忆: ${JSON.stringify(relevantMemories)}`
-            },
-            ...history
-          ];
-        }
-      }
-      
-      let assistantResponse = '';
+      let response;
       
       if (settings.streamMode) {
         // 流式响应处理
-        assistantResponse = await apiService.streamChat(
+        response = await apiService.streamChat(
           message,
-          contextWithMemories,
-          (chunk) => {
-            // 传递一个回调来处理流式文本
-            // 如果启用TTS，还需要在这里处理文本到语音的转换
+          conversations,
+          (chunk, fullResponse) => {
+            // 如果启用TTS，处理文本到语音的转换
             if (settings.ttsEnabled) {
-              audioManager.processStreamingText(chunk, settings.voiceStyle);
+              audioManager.processStreamingText(fullResponse, settings.voiceStyle);
             }
           }
         );
       } else {
         // 非流式响应
-        assistantResponse = await apiService.chat(message, contextWithMemories);
-        // 处理TTS
-        if (settings.ttsEnabled && assistantResponse) {
-          audioManager.generateSpeech(assistantResponse, settings.voiceStyle);
+        response = await apiService.chat(message, conversations);
+        
+        // 如果有音频URL，添加到音频管理器
+        if (settings.ttsEnabled && response.audioUrl) {
+          audioManager.addToQueue(settings.apiUrl + response.audioUrl);
         }
       }
       
       // 添加AI响应到对话
-      if (assistantResponse) {
-        setConversations(prev => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: assistantResponse,
-            timestamp: new Date().toISOString()
-          }
-        ]);
+      if (response.text) {
+        const assistantMessage: Message = {
+          role: 'assistant',
+          content: response.text,
+          timestamp: new Date().toISOString(),
+          audioPath: response.audioUrl
+        };
+        
+        setConversations(prev => [...prev, assistantMessage]);
       }
     } catch (error) {
       console.error('处理消息时出错:', error);
@@ -246,7 +226,7 @@ const HomePage: React.FC = () => {
             fontSize: '0.75rem',
             color: theme.palette.text.secondary 
           }}>
-            AI全息角色系统 | 基于React & Material UI构建 | {new Date().getFullYear()}
+            AI全息角色系统 | 基于FastAPI & React构建 | {new Date().getFullYear()}
           </Box>
         </Box>
       </div>

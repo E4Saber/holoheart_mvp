@@ -1,18 +1,18 @@
 // src/hooks/useApiService.ts
 import { useRef, useEffect } from 'react';
-
-interface ApiMessage {
-  role: string;
-  content: string;
-}
+import { Message } from '../pages/HomePage';
 
 interface ApiService {
-  chat: (message: string, history?: ApiMessage[]) => Promise<string>;
-  streamChat: (message: string, history?: ApiMessage[], onChunk?: (chunk: string, fullResponse: string) => void) => Promise<string>;
+  chat: (message: string, history?: Message[]) => Promise<{text: string, audioUrl?: string}>;
+  streamChat: (
+    message: string, 
+    history?: Message[], 
+    onChunk?: (chunk: string, fullResponse: string) => void
+  ) => Promise<{text: string, audioUrl?: string}>;
 }
 
 /**
- * API服务钩子，处理AI服务的API调用
+ * API服务钩子，处理与后端API的通信
  */
 export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
   const controller = useRef<AbortController | null>(null);
@@ -29,7 +29,7 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
   /**
    * 验证API配置
    */
-  const validateApiConfig = (): void => {
+  const validateConfig = (): void => {
     if (!apiKey) {
       throw new Error('API密钥未配置');
     }
@@ -42,8 +42,8 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
   /**
    * 执行非流式聊天请求
    */
-  const chat = async (message: string, history: ApiMessage[] = []): Promise<string> => {
-    validateApiConfig();
+  const chat = async (message: string, history: Message[] = []): Promise<{text: string, audioUrl?: string}> => {
+    validateConfig();
     
     // 取消之前的请求（如果有）
     if (controller.current) {
@@ -55,17 +55,17 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
     const signal = controller.current.signal;
     
     try {
-      // 准备请求体
+      // 准备请求体 - 适配后端API格式
       const requestBody = {
-        model: "moonshot-v1-8k", // 可配置为模型参数
-        messages: [
-          ...history,
-          { role: "user", content: message }
-        ]
+        message: message,
+        conversation_id: Date.now().toString(), // 生成唯一会话ID
+        stream: false,
+        tts_enabled: true,
+        voice_style: "normal" // 默认风格，可以从settings传入
       };
       
-      // 发送请求
-      const response = await fetch(`${apiUrl}/chat/completions`, {
+      // 发送请求到后端
+      const response = await fetch(`${apiUrl}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -78,18 +78,20 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
       // 检查响应状态
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `API请求失败，状态码: ${response.status}`);
+        throw new Error(errorData.detail || `API请求失败，状态码: ${response.status}`);
       }
       
       // 解析响应
       const responseData = await response.json();
-      const assistantMessage = responseData.choices?.[0]?.message?.content || '';
       
-      return assistantMessage;
+      return {
+        text: responseData.assistant_message.content,
+        audioUrl: responseData.audio_url
+      };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         console.log('请求已取消');
-        return '';
+        return { text: '' };
       }
       throw error;
     }
@@ -100,10 +102,10 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
    */
   const streamChat = async (
     message: string, 
-    history: ApiMessage[] = [], 
+    history: Message[] = [], 
     onChunk?: (chunk: string, fullResponse: string) => void
-  ): Promise<string> => {
-    validateApiConfig();
+  ): Promise<{text: string, audioUrl?: string}> => {
+    validateConfig();
     
     // 取消之前的请求（如果有）
     if (controller.current) {
@@ -115,18 +117,17 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
     const signal = controller.current.signal;
     
     try {
-      // 准备请求体
+      // 准备请求体 - 适配后端API格式
       const requestBody = {
-        model: "moonshot-v1-8k", // 可配置为模型参数
-        messages: [
-          ...history,
-          { role: "user", content: message }
-        ],
-        stream: true
+        message: message,
+        conversation_id: Date.now().toString(),
+        stream: true,
+        tts_enabled: true,
+        voice_style: "normal" // 默认风格，可以从settings传入
       };
       
-      // 发送请求
-      const response = await fetch(`${apiUrl}/chat/completions`, {
+      // 发送请求到后端流式端点
+      const response = await fetch(`${apiUrl}/api/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -139,10 +140,10 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
       // 检查响应状态
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `API请求失败，状态码: ${response.status}`);
+        throw new Error(errorData.detail || `API请求失败，状态码: ${response.status}`);
       }
       
-      // 获取响应流
+      // 获取事件流
       const reader = response.body?.getReader();
       if (!reader) {
         throw new Error('无法获取响应流');
@@ -150,6 +151,7 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
       
       const decoder = new TextDecoder('utf-8');
       let completeResponse = '';
+      let audioUrl: string | undefined;
       
       // 处理流数据
       while (true) {
@@ -159,21 +161,31 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
         // 解码收到的数据
         const chunk = decoder.decode(value, { stream: true });
         
-        // 处理数据块 (格式为 "data: {...}\n\n")
+        // 处理事件数据 (格式为 "data: {...}\n\n")
         const lines = chunk.split('\n\n');
         for (const line of lines) {
-          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+          if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.substring(6));
-              const content = data.choices?.[0]?.delta?.content || '';
               
-              if (content) {
-                completeResponse += content;
-                
-                // 如果提供了回调函数，调用它
-                if (onChunk && typeof onChunk === 'function') {
-                  onChunk(content, completeResponse);
+              // 根据事件类型处理
+              if (data.type === 'chunk') {
+                // 文本片段
+                const content = data.content || '';
+                if (content) {
+                  completeResponse += content;
+                  
+                  // 如果提供了回调函数，调用它
+                  if (onChunk && typeof onChunk === 'function') {
+                    onChunk(content, completeResponse);
+                  }
                 }
+              } else if (data.type === 'end') {
+                // 结束事件，可能包含音频URL
+                audioUrl = data.audio_url;
+              } else if (data.type === 'error') {
+                // 错误事件
+                throw new Error(data.content || '处理请求时出错');
               }
             } catch (e) {
               console.error('解析流数据失败:', e);
@@ -182,11 +194,14 @@ export const useApiService = (apiKey: string, apiUrl: string): ApiService => {
         }
       }
       
-      return completeResponse;
+      return {
+        text: completeResponse,
+        audioUrl
+      };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         console.log('请求已取消');
-        return '';
+        return { text: '' };
       }
       throw error;
     }
