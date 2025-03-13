@@ -1,0 +1,51 @@
+/* src/components/sidebar/SettingsSidebar.css */
+
+.settings-section {
+    margin-bottom: 20px;
+  }
+  
+  .settings-title {
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+  
+  .settings-form-control {
+    margin-bottom: 12px;
+  }
+  
+  .settings-divider {
+    margin: 16px 0;
+  }
+  
+  .settings-button {
+    margin-top: 8px;
+  }
+  
+  .settings-tooltip {
+    margin-left: 4px;
+    font-size: 16px;
+    opacity: 0.7;
+  }
+  
+  .settings-alert {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+    z-index: 1000;
+  }
+  
+  /* 处理较小屏幕 */
+  @media (max-height: 700px) {
+    .settings-section {
+      margin-bottom: 12px;
+    }
+    
+    .settings-form-control {
+      margin-bottom: 8px;
+    }
+    
+    .settings-divider {
+      margin: 12px 0;
+    }
+  }
