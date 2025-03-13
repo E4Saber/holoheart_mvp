@@ -25,6 +25,7 @@ from app.core.audio.speech_recognizer import get_speech_service
 from app.engine.tts_engine import text_to_speech
 from app.utils.text_cleaner import clean_text_for_tts, split_text_for_tts, find_sentence_end
 from app.config.config import settings
+from app.utils.audio_utils import merge_audio_segments
 
 # 创建API路由
 api_router = APIRouter()
@@ -193,8 +194,12 @@ async def stream_chat(request: ExtendedChatRequest):
                                     "content": msg.get("content", "")
                                 })
             
+            # 存储所有生成的音频片段路径
+            audio_segments = []
+            
             # 流式调用Kimi API
             # 在异步函数中使用async for需要一个实现了__aiter__方法的对象
+            print("开始流式聊天:", request.message)
             async for chunk in kimi_api_client.stream_chat(
                 message=request.message,
                 history=conversation_history
@@ -207,6 +212,8 @@ async def stream_chat(request: ExtendedChatRequest):
                     
                     # 发送文本块给客户端
                     yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+
+                    print("收到文本块:", content)
                     
                     # 如果启用了TTS并积累了足够长度的文本，生成语音
                     if request.tts_enabled and accumulated_text:
@@ -231,6 +238,9 @@ async def stream_chat(request: ExtendedChatRequest):
                                 shutil.copy2(audio_path, static_path)
                                 # 复制后删除原文件
                                 os.unlink(audio_path)
+
+                                # 添加到片段列表
+                                audio_segments.append(static_path)
                                 
                                 # 发送音频URL给客户端
                                 audio_url = f"/audio/{filename}"
@@ -260,12 +270,22 @@ async def stream_chat(request: ExtendedChatRequest):
                             shutil.copy2(audio_path, static_path)
                             # 复制后删除原文件
                             os.unlink(audio_path)
+
+                            # 添加到片段列表
+                            audio_segments.append(static_path)
                             
                             # 设置最终音频URL
                             audio_url = f"/audio/{filename}"
                             
                             # 发送最后一个音频URL给客户端
                             yield f"data: {json.dumps({'type': 'audio', 'audio_url': audio_url})}\n\n"
+                        
+                        # 合并所有的音频片段
+                        if audio_segments:
+                            _, complete_audio_url = await merge_audio_segments(audio_segments)
+                            if complete_audio_url:
+                                yield f"data: {json.dumps({'type': 'complete_audio', 'audio_url': complete_audio_url})}\n\n"
+                                return
                     
                     # 发送完成事件
                     yield f"data: {json.dumps({'type': 'end', 'audio_url': audio_url})}\n\n"

@@ -222,6 +222,12 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
                     }, 500);
                   }
                 }
+              } else if (data.type == 'complete_audio') {
+                // 最终音频URL
+                audioUrl = data.audio_url;
+                
+                console.log("Final audio URL:", audioUrl);
+                
               } else if (data.type === 'end') {
                 // 结束事件，可能包含最终音频URL
                 audioUrl = data.audio_url;

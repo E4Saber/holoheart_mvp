@@ -90,25 +90,52 @@ export const useAudioManager = (apiUrl: string = ''): AudioManager => {
       console.log("Queue empty or audio ref not available");
       return;
     }
+
+    // 已经在播放，不启动新的播放
+    if (isPlaying) {
+      return;
+    }
     
     const nextAudio = queue[0];
     console.log("Now playing from queue:", nextAudio);
     setQueue(prev => prev.slice(1));
     
-    setCurrentAudio(nextAudio);
-    audioRef.current.src = nextAudio;
-    audioRef.current.load(); // 确保加载
-
-    audioRef.current.play()
+    // 先检查文件是否存在可访问
+    fetch(nextAudio, { method: 'HEAD' })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`File not accessible: ${response.status}`);
+      }
+      
+      // 从队列中移除此项
+      setQueue(prev => prev.slice(1));
+      
+      // 设置当前播放音频
+      setCurrentAudio(nextAudio);
+      audioRef.current!.src = nextAudio;
+      audioRef.current!.load();
+      
+      // 播放音频
+      return audioRef.current!.play();
+    })
     .then(() => {
-      console.log("Audio playback started successfully");
+      console.log("Started playing:", nextAudio);
       setIsPlaying(true);
     })
     .catch(error => {
-      console.error("Audio playback failed:", error);
+      console.error("Failed to play audio:", error);
+      
+      // 从队列中移除
+      setQueue(prev => prev.slice(1));
+      
+      // 重置状态
       setIsPlaying(false);
-      // 尝试播放下一个
-      playNextInQueue();
+      setCurrentAudio(null);
+      
+      // 继续尝试下一个
+      setTimeout(() => {
+        playNextInQueue();
+      }, 500); // 短暂延迟后尝试下一个
     });
   };
 

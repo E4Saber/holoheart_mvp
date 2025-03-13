@@ -16,6 +16,7 @@ export interface Message {
   timestamp: string;
   isError?: boolean;
   audioPath?: string;
+  completeAudioPath?: string;
   isTyping?: boolean;
 }
 

@@ -148,11 +148,11 @@ const ChatTab: React.FC<ChatTabProps> = ({
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                     
                     {/* 如果有音频路径，显示播放按钮 */}
-                    {msg.audioPath && (
+                    {msg.completeAudioPath && (
                       <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
                         <IconButton 
                           size="small" 
-                          onClick={() => audioManager.playAudioFromUrl(apiUrl + msg.audioPath)}
+                          onClick={() => msg.completeAudioPath && audioManager.playAudioFromUrl(msg.completeAudioPath)}
                           sx={{ fontSize: '0.75rem' }}
                         >
                           🔊 播放语音
