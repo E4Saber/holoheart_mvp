@@ -213,7 +213,7 @@ async def stream_chat(request: ExtendedChatRequest):
                     # 发送文本块给客户端
                     yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
 
-                    print("收到文本块:", content)
+                    # print("收到文本块:", content)
                     
                     # 如果启用了TTS并积累了足够长度的文本，生成语音
                     if request.tts_enabled and accumulated_text:
@@ -277,19 +277,20 @@ async def stream_chat(request: ExtendedChatRequest):
                             # 设置最终音频URL
                             audio_url = f"/audio/{filename}"
                             
-                            # 发送最后一个音频URL给客户端
-                            yield f"data: {json.dumps({'type': 'audio', 'audio_url': audio_url})}\n\n"
-                        
-                        # 合并所有的音频片段
-                        if audio_segments:
-                            _, complete_audio_url = await merge_audio_segments(audio_segments)
-                            if complete_audio_url:
-                                yield f"data: {json.dumps({'type': 'complete_audio', 'audio_url': complete_audio_url})}\n\n"
-                                return
+                    # 合并所有的音频片段
+                    if audio_segments:
+                        _, complete_audio_url = await merge_audio_segments(audio_segments)
+                        if complete_audio_url:
+                            yield f"data: {json.dumps({'type': 'complete_audio', 'audio_url': complete_audio_url})}\n\n"
                     
-                    # 发送完成事件
-                    yield f"data: {json.dumps({'type': 'end', 'audio_url': audio_url})}\n\n"
-                    return
+                    if audio_url:
+                        # 发送最后一个音频URL给客户端
+                        yield f"data: {json.dumps({'type': 'audio', 'audio_url': audio_url})}\n\n"
+                        # 发送不包含音频URL的end事件
+                        yield f"data: {json.dumps({'type': 'end'})}\n\n"
+                    else:
+                        # 发送可能包含音频URL的end事件
+                        yield f"data: {json.dumps({'type': 'end', 'audio_url': audio_url})}\n\n"
             
         return StreamingResponse(event_generator(), media_type="text/event-stream")
     

@@ -36,8 +36,10 @@ async def merge_audio_segments(segment_paths, output_filename=None):
     else:
         # 合并多个音频片段
         try:
+            print(f"合并音频片段[0]: {segment_paths[0]}")
             combined = AudioSegment.from_mp3(segment_paths[0])
             for segment_path in segment_paths[1:]:
+                print(f"合并音频片段: {segment_path}")
                 segment = AudioSegment.from_mp3(segment_path)
                 combined += segment
                 

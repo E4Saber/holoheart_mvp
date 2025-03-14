@@ -23,7 +23,7 @@ interface ApiService {
     history?: ApiMessage[], 
     onChunk?: (chunk: string, fullResponse: string) => void,
     onAudioAvailable?: (audioUrl: string) => void
-  ) => Promise<{text: string, audioUrl?: string}>;
+  ) => Promise<{text: string, audioUrl?: string, completeFullAudioUrl?: string}>;
 }
 
 /**
@@ -125,7 +125,7 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
     history: ApiMessage[] = [], 
     onChunk?: (chunk: string, fullResponse: string) => void,
     onAudioAvailable?: (audioUrl: string) => void
-  ): Promise<{text: string, audioUrl?: string}> => {
+  ): Promise<{text: string, audioUrl?: string, completeFullAudioUrl?: string}> => {
     validateConfig();
     
     // 取消之前的请求（如果有）
@@ -170,6 +170,7 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
       const decoder = new TextDecoder('utf-8');
       let completeResponse = '';
       let audioUrl: string | undefined;
+      let completeFullAudioUrl: string | undefined;
       
       // 处理流数据
       while (true) {
@@ -201,6 +202,7 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
               } else if (data.type === 'audio') {
                 // 音频片段可用
                 const audioUrlFragment = data.audio_url;
+                console.log("收到音频事件:", audioUrlFragment);
                 
                 if (audioUrlFragment) {
                   // 构建完整URL
@@ -215,7 +217,6 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
                   
                   // 确保完整URL传递给音频管理器
                   if (audioManager) {
-                    console.log("Playing audio from URL:", fullAudioUrl);
                     // 引入延迟确保服务器有时间处理文件
                     setTimeout(() => {
                       audioManager.playAudioFromUrl(fullAudioUrl);
@@ -224,13 +225,24 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
                 }
               } else if (data.type == 'complete_audio') {
                 // 最终音频URL
-                audioUrl = data.audio_url;
+                const finalCompleteAudioUrl = data.audio_url;
+
+                console.log("收到最终音频数据:", data);
+
+                completeFullAudioUrl = finalCompleteAudioUrl.startsWith('http') 
+                    ? finalCompleteAudioUrl 
+                    : `${apiUrl}${finalCompleteAudioUrl}`;
                 
-                console.log("Final audio URL:", audioUrl);
+                console.log("Complete full audio URL:", completeFullAudioUrl);
+
+                // if (onAudioAvailable && typeof onAudioAvailable === 'function') {
+                //   onAudioAvailable(completeFullAudioUrl || '');
+                // }
                 
               } else if (data.type === 'end') {
                 // 结束事件，可能包含最终音频URL
                 audioUrl = data.audio_url;
+                console.log("收到结束事件，音频URL:", audioUrl);
                 
                 // 如果有最终音频URL且之前未处理，且提供了音频管理器，自动播放
                 if (audioUrl && !audioManager?.audioFiles.includes(audioUrl) && audioManager) {
@@ -249,7 +261,8 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
       
       return {
         text: completeResponse,
-        audioUrl
+        audioUrl,
+        completeFullAudioUrl
       };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {

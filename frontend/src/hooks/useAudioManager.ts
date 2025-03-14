@@ -15,15 +15,17 @@ interface AudioStatus {
   queueLength: number;
 }
 
-/**
- * 音频管理器钩子，处理音频播放和管理
- */
 export const useAudioManager = (apiUrl: string = ''): AudioManager => {
   const [audioFiles, setAudioFiles] = useState<string[]>([]);
   const [currentAudio, setCurrentAudio] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [queue, setQueue] = useState<string[]>([]);
+  
+  // 使用useRef替代useState来管理队列
+  const queueRef = useRef<string[]>([]);
+  const playingRef = useRef<boolean>(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // 添加一个正在处理队列的标记，防止多个异步处理重叠
+  const processingQueueRef = useRef<boolean>(false);
   
   const baseUrl = apiUrl || window.location.origin;
 
@@ -31,18 +33,65 @@ export const useAudioManager = (apiUrl: string = ''): AudioManager => {
   useEffect(() => {
     audioRef.current = new Audio();
     
-    // 音频播放结束时，播放下一个队列中的文件
-    const handleAudioEnd = () => {
-      setIsPlaying(false);
-      playNextInQueue();
+    // 添加更多的音频事件监听器，帮助调试
+    const handleAudioEvent = (event: string) => (e: Event) => {
+      console.log(`Audio event: ${event}`, e);
     };
     
-    audioRef.current.addEventListener('ended', handleAudioEnd);
+    // 音频播放结束时，播放下一个队列中的文件
+    const handleAudioEnd = () => {
+      console.log("Audio ended, current URL:", audioRef.current?.src);
+      
+      // 重要：标记当前不在播放状态
+      playingRef.current = false;
+      setIsPlaying(false);
+      
+      // 重要：先检查处理队列的标记，防止重复处理
+      if (!processingQueueRef.current && queueRef.current.length > 0) {
+        console.log("Queue has more items, processing next...");
+        processQueue();
+      } else {
+        console.log("Queue empty or already processing");
+      }
+    };
+    
+    const handleAudioError = (e: Event) => {
+      console.error("Audio error:", e);
+      playingRef.current = false;
+      setIsPlaying(false);
+      
+      // 重要：先检查处理队列的标记，防止重复处理
+      if (!processingQueueRef.current && queueRef.current.length > 0) {
+        console.log("Error occurred, trying next in queue...");
+        processQueue();
+      }
+    };
+    
+    if (audioRef.current) {
+      // 添加基本事件监听
+      audioRef.current.addEventListener('ended', handleAudioEnd);
+      audioRef.current.addEventListener('error', handleAudioError);
+      
+      // 添加额外事件用于调试
+      audioRef.current.addEventListener('play', handleAudioEvent('play'));
+      audioRef.current.addEventListener('playing', handleAudioEvent('playing'));
+      audioRef.current.addEventListener('pause', handleAudioEvent('pause'));
+      audioRef.current.addEventListener('waiting', handleAudioEvent('waiting'));
+      audioRef.current.addEventListener('canplay', handleAudioEvent('canplay'));
+    }
     
     // 组件卸载时的清理
     return () => {
       if (audioRef.current) {
         audioRef.current.removeEventListener('ended', handleAudioEnd);
+        audioRef.current.removeEventListener('error', handleAudioError);
+        // 移除额外事件监听器
+        audioRef.current.removeEventListener('play', handleAudioEvent('play'));
+        audioRef.current.removeEventListener('playing', handleAudioEvent('playing'));
+        audioRef.current.removeEventListener('pause', handleAudioEvent('pause'));
+        audioRef.current.removeEventListener('waiting', handleAudioEvent('waiting'));
+        audioRef.current.removeEventListener('canplay', handleAudioEvent('canplay'));
+        
         audioRef.current.pause();
         audioRef.current = null;
       }
@@ -50,12 +99,26 @@ export const useAudioManager = (apiUrl: string = ''): AudioManager => {
     };
   }, []);
 
-  // 队列变化时，如果没有正在播放，开始播放
-  useEffect(() => {
-    if (queue.length > 0 && !isPlaying && audioRef.current) {
-      playNextInQueue();
+  /**
+   * 安全地处理队列 - 非异步包装函数
+   * 这个函数确保在任何时候只有一个队列处理流程在进行
+   */
+  const processQueue = () => {
+    // 如果已经在处理队列或者正在播放，直接返回
+    if (processingQueueRef.current || playingRef.current) {
+      console.log("Already processing queue or playing, skipping");
+      return;
     }
-  }, [queue, isPlaying]);
+    
+    // 设置处理队列标记
+    processingQueueRef.current = true;
+    
+    // 非异步调用，但内部会处理异步
+    playNextInQueue().finally(() => {
+      // 异步操作完成后，重置处理队列标记
+      processingQueueRef.current = false;
+    });
+  };
 
   /**
    * 直接从URL播放音频
@@ -63,80 +126,128 @@ export const useAudioManager = (apiUrl: string = ''): AudioManager => {
   const playAudioFromUrl = (audioUrl: string): void => {
     // 追踪音频文件
     const fullUrl = audioUrl.startsWith('http') ? audioUrl : `${baseUrl}${audioUrl}`;
-
-    console.log("Playing audio from URL:", fullUrl);
     
+    const callId = Date.now().toString().substr(-4); // 用于日志追踪
+    console.log(`[${callId}] 请求播放音频: ${fullUrl}`);
+    console.log(`[${callId}] 当前队列长度: ${queueRef.current.length}`);
+    console.log(`[${callId}] 当前播放状态: playingRef=${playingRef.current}, processingQueue=${processingQueueRef.current}`);
+
     // 添加到文件列表
     if (!audioFiles.includes(fullUrl)) {
       setAudioFiles(prev => [...prev, fullUrl]);
     }
     
-    // 添加到播放队列
-    addToQueue(fullUrl);
+    // 添加到队列
+    queueRef.current.push(fullUrl);
+    console.log(`[${callId}] 添加后队列长度: ${queueRef.current.length}`);
+    
+    // 如果当前没有播放且没有正在处理队列，启动队列处理
+    if (!playingRef.current && !processingQueueRef.current) {
+      console.log(`[${callId}] 开始处理队列`);
+      processQueue();
+    } else {
+      console.log(`[${callId}] 已在播放或处理队列中，不启动新处理`);
+    }
   };
 
   /**
    * 将音频添加到播放队列
    */
   const addToQueue = (audioUrl: string): void => {
-    setQueue(prev => [...prev, audioUrl]);
+    queueRef.current.push(audioUrl);
+    
+    // 如果当前没有播放且没有正在处理队列，启动队列处理
+    if (!playingRef.current && !processingQueueRef.current) {
+      processQueue();
+    }
   };
 
   /**
    * 播放队列中的下一个音频
+   * 注意：这是一个内部异步函数，不应直接调用
+   * 应通过processQueue函数调用，以确保状态管理正确
    */
-  const playNextInQueue = (): void => {
-    if (queue.length === 0 || !audioRef.current) {
-      console.log("Queue empty or audio ref not available");
-      return;
-    }
-
-    // 已经在播放，不启动新的播放
-    if (isPlaying) {
-      return;
-    }
+  const playNextInQueue = async (): Promise<void> => {
+    const callId = Date.now().toString().substr(-4); // 用于日志追踪
     
-    const nextAudio = queue[0];
-    console.log("Now playing from queue:", nextAudio);
-    setQueue(prev => prev.slice(1));
+    try {
+      // 再次检查队列状态，防止条件发生变化
+      if (queueRef.current.length === 0 || !audioRef.current) {
+        console.log(`[${callId}] Queue empty or audio ref not available`);
+        return;
+      }
     
-    // 先检查文件是否存在可访问
-    fetch(nextAudio, { method: 'HEAD' })
-    .then(response => {
+      // 已经在播放，不启动新的播放
+      if (playingRef.current) {
+        console.log(`[${callId}] Already playing, not starting new playback`);
+        return;
+      }
+      
+      // 从队列中获取下一个音频
+      const nextAudio = queueRef.current.shift();
+      if (!nextAudio) {
+        console.log(`[${callId}] Shifted empty item from queue`);
+        return;
+      }
+      
+      // 标记正在播放
+      playingRef.current = true;
+      setIsPlaying(true);
+      
+      console.log(`[${callId}] Now playing from queue: ${nextAudio}`);
+      console.log(`[${callId}] Remaining in queue: ${queueRef.current.length}`);
+      
+      // 检查文件是否存在可访问
+      const response = await fetch(nextAudio, { method: 'HEAD' });
       if (!response.ok) {
         throw new Error(`File not accessible: ${response.status}`);
       }
       
-      // 从队列中移除此项
-      setQueue(prev => prev.slice(1));
+      // 检查Content-Length确认文件不为空
+      const contentLength = response.headers.get('content-length');
+      console.log(`[${callId}] Audio file size: ${contentLength} bytes`);
+      
+      if (contentLength && parseInt(contentLength) < 100) {
+        console.warn(`[${callId}] Audio file is too small, may be empty or corrupted`);
+      }
       
       // 设置当前播放音频
       setCurrentAudio(nextAudio);
-      audioRef.current!.src = nextAudio;
-      audioRef.current!.load();
       
-      // 播放音频
-      return audioRef.current!.play();
-    })
-    .then(() => {
-      console.log("Started playing:", nextAudio);
-      setIsPlaying(true);
-    })
-    .catch(error => {
-      console.error("Failed to play audio:", error);
-      
-      // 从队列中移除
-      setQueue(prev => prev.slice(1));
+      // 停止当前播放并设置新音频
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = nextAudio;
+        audioRef.current.load();
+        
+        // 添加onloadedmetadata事件
+        audioRef.current.onloadedmetadata = () => {
+          console.log(`[${callId}] Audio metadata loaded:`, {
+            duration: audioRef.current?.duration,
+            src: audioRef.current?.src
+          });
+        };
+        
+        // 尝试播放
+        console.log(`[${callId}] Starting playback: ${nextAudio}`);
+        await audioRef.current.play();
+        console.log(`[${callId}] Successfully started playing: ${nextAudio}`);
+      }
+    } catch (error) {
+      console.error(`[${callId}] Failed to play audio:`, error);
       
       // 重置状态
+      playingRef.current = false;
       setIsPlaying(false);
       setCurrentAudio(null);
       
-      // 继续尝试下一个
-      setTimeout(() => {
-        playNextInQueue();
-      }, 500); // 短暂延迟后尝试下一个
-    });
+      // 如果队列中还有项目，尝试下一个
+      if (queueRef.current.length > 0) {
+        console.log(`[${callId}] Trying next audio in queue`);
+        // 直接调用processQueue，它会检查状态并决定是否处理
+        processQueue();
+      }
+    }
   };
 
   /**
@@ -146,7 +257,9 @@ export const useAudioManager = (apiUrl: string = ''): AudioManager => {
     if (audioRef.current) {
       audioRef.current.pause();
     }
-    setQueue([]);
+    queueRef.current = [];
+    playingRef.current = false;
+    processingQueueRef.current = false;
     setIsPlaying(false);
     setCurrentAudio(null);
     setAudioFiles([]);
@@ -159,7 +272,7 @@ export const useAudioManager = (apiUrl: string = ''): AudioManager => {
     return {
       isPlaying,
       currentAudio,
-      queueLength: queue.length
+      queueLength: queueRef.current.length
     };
   };
 

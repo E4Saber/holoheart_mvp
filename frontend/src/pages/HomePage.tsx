@@ -16,7 +16,7 @@ export interface Message {
   timestamp: string;
   isError?: boolean;
   audioPath?: string;
-  completeAudioPath?: string;
+  completeFullAudioPath?: string;
   isTyping?: boolean;
 }
 
@@ -181,6 +181,20 @@ const HomePage: React.FC = () => {
         // 使用函数返回的最终值更新
         assistantResponse = streamResult.text;
         finalAudioUrl = finalAudioUrl || streamResult.audioUrl;
+        // 更新最后一条消息的完整音频URL
+        setConversations(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg.role === 'assistant' && lastMsg.isTyping) {
+            return [
+              ...prev.slice(0, prev.length - 1),
+              {
+                ...lastMsg,
+                completeFullAudioPath: streamResult.completeFullAudioUrl
+              }
+            ];
+          }
+          return prev;
+        });
       } else {
         // 非流式响应
         const response = await apiService.chat(requestParams, history);
