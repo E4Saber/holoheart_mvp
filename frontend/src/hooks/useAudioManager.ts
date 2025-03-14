@@ -198,41 +198,92 @@ export const useAudioManager = (apiUrl: string = ''): AudioManager => {
       console.log(`[${callId}] Remaining in queue: ${queueRef.current.length}`);
       
       // 检查文件是否存在可访问
-      const response = await fetch(nextAudio, { method: 'HEAD' });
-      if (!response.ok) {
-        throw new Error(`File not accessible: ${response.status}`);
-      }
+      // const response = await fetch(nextAudio, { method: 'HEAD' });
+      // if (!response.ok) {
+      //   throw new Error(`File not accessible: ${response.status}`);
+      // }
       
       // 检查Content-Length确认文件不为空
-      const contentLength = response.headers.get('content-length');
-      console.log(`[${callId}] Audio file size: ${contentLength} bytes`);
+      // const contentLength = response.headers.get('content-length');
+      // console.log(`[${callId}] Audio file size: ${contentLength} bytes`);
       
-      if (contentLength && parseInt(contentLength) < 100) {
-        console.warn(`[${callId}] Audio file is too small, may be empty or corrupted`);
-      }
+      // if (contentLength && parseInt(contentLength) < 100) {
+      //   console.warn(`[${callId}] Audio file is too small, may be empty or corrupted`);
+      // }
       
       // 设置当前播放音频
       setCurrentAudio(nextAudio);
       
-      // 停止当前播放并设置新音频
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = nextAudio;
-        audioRef.current.load();
+      // 使用非阻塞方式加载和播放音频
+      console.log(`[${callId}] Setting up audio element`);
+      
+      // 重要：创建新的Audio元素而不是重用
+      const audioElement = new Audio();
+      
+      // 设置preload为"none"避免阻塞加载
+      audioElement.preload = "none";
+      
+      // 监听错误
+      audioElement.onerror = (e) => {
+        console.error(`[${callId}] Audio error:`, e);
+        playingRef.current = false;
+        setIsPlaying(false);
         
-        // 添加onloadedmetadata事件
-        audioRef.current.onloadedmetadata = () => {
-          console.log(`[${callId}] Audio metadata loaded:`, {
-            duration: audioRef.current?.duration,
-            src: audioRef.current?.src
-          });
-        };
+        // 尝试队列中的下一个
+        setTimeout(() => {
+          if (queueRef.current.length > 0) {
+            processQueue();
+          }
+        }, 0);
+      };
+      
+      // 监听播放结束
+      audioElement.onended = () => {
+        console.log(`[${callId}] Audio ended`);
+        playingRef.current = false;
+        setIsPlaying(false);
+        
+        // 尝试队列中的下一个
+        setTimeout(() => {
+          if (queueRef.current.length > 0) {
+            processQueue();
+          }
+        }, 0);
+      };
+      
+      // 设置音频源
+      audioElement.src = nextAudio;
+      
+      // 使用setTimeout非阻塞播放
+      setTimeout(() => {
+        console.log(`[${callId}] Starting playback with non-blocking approach`);
         
         // 尝试播放
-        console.log(`[${callId}] Starting playback: ${nextAudio}`);
-        await audioRef.current.play();
-        console.log(`[${callId}] Successfully started playing: ${nextAudio}`);
-      }
+        const playPromise = audioElement.play();
+        
+        if (playPromise) {
+          playPromise
+            .then(() => {
+              console.log(`[${callId}] Successfully started playing: ${nextAudio}`);
+              
+              // 更新引用
+              if (audioRef.current) {
+                audioRef.current.pause();
+              }
+              audioRef.current = audioElement;
+            })
+            .catch(error => {
+              console.error(`[${callId}] Play promise error:`, error);
+              playingRef.current = false;
+              setIsPlaying(false);
+              
+              // 尝试队列中的下一个
+              if (queueRef.current.length > 0) {
+                setTimeout(() => processQueue(), 0);
+              }
+            });
+        }
+      }, 0);
     } catch (error) {
       console.error(`[${callId}] Failed to play audio:`, error);
       

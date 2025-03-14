@@ -137,7 +137,8 @@ const HomePage: React.FC = () => {
       }));
       
       let assistantResponse = '';
-      let finalAudioUrl: string | undefined;
+      let finalAudioUrl = '';
+      let completeFullAudioPath = '';
       
       if (settings.streamMode) {
         // 流式响应处理
@@ -177,10 +178,13 @@ const HomePage: React.FC = () => {
             finalAudioUrl = audioUrl; // 保存最新的音频URL
           }
         );
+
+        console.log('流式响应处理完成:', streamResult);
         
         // 使用函数返回的最终值更新
         assistantResponse = streamResult.text;
-        finalAudioUrl = finalAudioUrl || streamResult.audioUrl;
+        // finalAudioUrl = finalAudioUrl || streamResult.audioUrl;
+        completeFullAudioPath = streamResult.completeFullAudioUrl || '';
         // 更新最后一条消息的完整音频URL
         setConversations(prev => {
           const lastMsg = prev[prev.length - 1];
@@ -189,7 +193,7 @@ const HomePage: React.FC = () => {
               ...prev.slice(0, prev.length - 1),
               {
                 ...lastMsg,
-                completeFullAudioPath: streamResult.completeFullAudioUrl
+                // completeFullAudioPath: streamResult.completeFullAudioUrl
               }
             ];
           }
@@ -199,7 +203,7 @@ const HomePage: React.FC = () => {
         // 非流式响应
         const response = await apiService.chat(requestParams, history);
         assistantResponse = response.text;
-        finalAudioUrl = response.audioUrl;
+        // finalAudioUrl = response.audioUrl;
       }
       
       // 添加最终AI响应到对话
@@ -213,7 +217,8 @@ const HomePage: React.FC = () => {
               role: 'assistant',
               content: assistantResponse,
               timestamp: new Date().toISOString(),
-              audioPath: finalAudioUrl
+              // audioPath: finalAudioUrl
+              completeFullAudioPath: completeFullAudioPath
             }
           ];
         });
