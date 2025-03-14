@@ -1,6 +1,8 @@
 // src/hooks/useApiService.ts
 import { useRef, useEffect } from 'react';
 import { AudioManager } from './useAudioManager';
+import { EnhancedAudioManager } from './useEnhancedAudioManager';
+import { ParallelAudioManager } from './useParallelAudioManager';
 
 interface RequestParams {
   message: string;
@@ -22,14 +24,14 @@ interface ApiService {
     params: RequestParams, 
     history?: ApiMessage[], 
     onChunk?: (chunk: string, fullResponse: string) => void,
-    onAudioAvailable?: (audioUrl: string) => void
+    onAudioAvailable?: (audioUrl: string, priority: number) => void
   ) => Promise<{text: string, audioUrl?: string, completeFullAudioUrl?: string}>;
 }
 
 /**
  * API服务钩子，处理与后端API的通信
  */
-export const useApiService = (apiKey: string, apiUrl: string, audioManager?: AudioManager): ApiService => {
+export const useApiService = (apiKey: string, apiUrl: string, audioManager?: ParallelAudioManager): ApiService => {
   const controller = useRef<AbortController | null>(null);
   
   // 在组件卸载时取消任何正在进行的请求
@@ -124,7 +126,7 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
     params: RequestParams,
     history: ApiMessage[] = [], 
     onChunk?: (chunk: string, fullResponse: string) => void,
-    onAudioAvailable?: (audioUrl: string) => void
+    onAudioAvailable?: (audioUrl: string, priority: number) => void
   ): Promise<{text: string, audioUrl?: string, completeFullAudioUrl?: string}> => {
     validateConfig();
     
@@ -171,6 +173,8 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
       let completeResponse = '';
       let audioUrl: string | undefined;
       let completeFullAudioUrl: string | undefined;
+      let audioChunks: string[] = []; // 用于跟踪所有音频块
+      let chunkCounter = 0; // 用于确定音频块的顺序
       
       // 处理流数据
       while (true) {
@@ -210,17 +214,16 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
                     ? audioUrlFragment 
                     : `${apiUrl}${audioUrlFragment}`;
                   
-                  // 先加入队列
-                  if (onAudioAvailable && typeof onAudioAvailable === 'function') {
-                    onAudioAvailable(fullAudioUrl);
-                  }
+                  // 将音频URL添加到追踪列表
+                  audioChunks.push(fullAudioUrl);
                   
-                  // 确保完整URL传递给音频管理器
-                  if (audioManager) {
-                    // 引入延迟确保服务器有时间处理文件
-                    setTimeout(() => {
-                      audioManager.playAudioFromUrl(fullAudioUrl);
-                    }, 500);
+                  // 为每个音频块分配一个优先级 - 基于收到顺序
+                  // 较低的数字 = 较高的优先级，确保按顺序播放
+                  const priority = 1000 - chunkCounter;
+                  
+                  // 调用回调函数，并传递优先级信息
+                  if (onAudioAvailable && typeof onAudioAvailable === 'function') {
+                    onAudioAvailable(fullAudioUrl, priority);
                   }
                 }
               } else if (data.type == 'complete_audio') {
@@ -245,9 +248,9 @@ export const useApiService = (apiKey: string, apiUrl: string, audioManager?: Aud
                 console.log("收到结束事件，音频URL:", audioUrl);
                 
                 // 如果有最终音频URL且之前未处理，且提供了音频管理器，自动播放
-                if (audioUrl && !audioManager?.audioFiles.includes(audioUrl) && audioManager) {
-                  audioManager.playAudioFromUrl(audioUrl);
-                }
+                // if (audioUrl && !audioManager?.audioFiles.includes(audioUrl) && audioManager) {
+                //   audioManager.playAudioFromUrl(audioUrl);
+                // }
               } else if (data.type === 'error') {
                 // 错误事件
                 throw new Error(data.content || '处理请求时出错');

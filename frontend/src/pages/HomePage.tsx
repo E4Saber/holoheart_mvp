@@ -1,10 +1,12 @@
 // src/pages/HomePage.tsx
 import React, { useState, useEffect } from 'react';
 import { Tabs, Tab, Box, Typography, useTheme, FormControlLabel, Switch } from '@mui/material';
+import { useEnhancedAudioManager } from '../hooks/useEnhancedAudioManager';
 import ChatTab from '../components/chat/ChatTab';
 import MemoryTab from '../components/memory/MemoryTab';
 import SettingsSidebar from '../components/sidebar/SettingsSidebar';
 import { useAudioManager } from '../hooks/useAudioManager';
+import { useParallelAudioManager } from '../hooks/useParallelAudioManager';
 import { useMemorySystem } from '../hooks/useMemorySystem';
 import { useApiService } from '../hooks/useApiService';
 import './HomePage.css';
@@ -48,7 +50,9 @@ const HomePage: React.FC = () => {
   });
 
   // 从服务中获取钩子实例
-  const audioManager = useAudioManager(settings.apiUrl);
+  // const audioManager = useAudioManager(settings.apiUrl);
+  // const audioManager = useEnhancedAudioManager(settings.apiUrl);
+  const audioManager = useParallelAudioManager(settings.apiUrl);
   const memorySystem = useMemorySystem(settings.apiUrl);
   const apiService = useApiService(settings.apiKey, settings.apiUrl, audioManager);
 
@@ -139,6 +143,7 @@ const HomePage: React.FC = () => {
       let assistantResponse = '';
       let finalAudioUrl = '';
       let completeFullAudioPath = '';
+      let chunkCount = 0; // 追踪块数量，用于优先级
       
       if (settings.streamMode) {
         // 流式响应处理
@@ -148,6 +153,7 @@ const HomePage: React.FC = () => {
           (chunk, fullResponse) => {
             // 累积完整响应文本
             assistantResponse = fullResponse;
+            chunkCount++; // 递增块计数
             
             // 更新AI正在打字的显示
             setConversations(prev => {
@@ -172,10 +178,13 @@ const HomePage: React.FC = () => {
               return newConversations;
             });
           },
-          (audioUrl) => {
-            // 后端自动生成并返回了音频URL，前端不需要处理
-            // 音频将通过audioManager直接播放
-            finalAudioUrl = audioUrl; // 保存最新的音频URL
+          (audioUrl, priority) => {
+            if (settings.ttsEnabled) {
+              // 使用传入的优先级播放音频
+              // 优先级随着块数量增加而降低，这样早期的片段先播放
+              audioManager.playAudioFromUrl(audioUrl, priority);
+              finalAudioUrl = audioUrl; // 保存最新的音频URL
+            }
           }
         );
 
@@ -204,6 +213,11 @@ const HomePage: React.FC = () => {
         const response = await apiService.chat(requestParams, history);
         assistantResponse = response.text;
         // finalAudioUrl = response.audioUrl;
+        // 如果有音频URL且启用了TTS，播放音频
+        if (response.audioUrl && settings.ttsEnabled) {
+          audioManager.playAudioFromUrl(response.audioUrl);
+          finalAudioUrl = response.audioUrl;
+        }
       }
       
       // 添加最终AI响应到对话
